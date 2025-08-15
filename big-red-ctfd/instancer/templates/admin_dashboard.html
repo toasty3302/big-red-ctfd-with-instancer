@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-cog"></i> Admin Dashboard</h2>
+        <p class="text-muted">Manage all user instances and system overview</p>
+    </div>
+</div>
+
+<!-- System Overview -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center border-primary">
+            <div class="card-body">
+                <h5 class="card-title text-primary">{{ stats.active_count }}</h5>
+                <p class="card-text">Active Containers</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-success">
+            <div class="card-body">
+                <h5 class="card-title text-success">{{ total_users }}</h5>
+                <p class="card-text">Users with Instances</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-info">
+            <div class="card-body">
+                <h5 class="card-title text-info">{{ stats.running_count }}</h5>
+                <p class="card-text">Running Containers</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center border-warning">
+            <div class="card-body">
+                <h5 class="card-title text-warning">{{ stats.creating_count }}</h5>
+                <p class="card-text">Creating Containers</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Capacity Overview -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-info">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Server Capacity</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span><strong>Usage:</strong> {{ stats.active_count }}/50 containers</span>
+                    <span class="badge bg-{{ 'danger' if stats.active_count >= 45 else 'warning' if stats.active_count >= 40 else 'success' }} fs-6">
+                        {{ ((stats.active_count / 50) * 100) | round(1) }}%
+                    </span>
+                </div>
+                <div class="progress" style="height: 20px;">
+                    <div class="progress-bar bg-{{ 'danger' if stats.active_count >= 45 else 'warning' if stats.active_count >= 40 else 'success' }}" 
+                         role="progressbar" 
+                         style="width: {{ ((stats.active_count / 50) * 100) | round(1) }}%">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-tools"></i> Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <button class="btn btn-warning me-2" onclick="refreshAdminData()">
+                    <i class="fas fa-sync-alt"></i> Refresh Data
+                </button>
+                <form method="POST" action="{{ url_for('manual_cleanup') }}" class="d-inline">
+                    <button type="submit" class="btn btn-danger me-2" 
+                            onclick="return confirm('Are you sure you want to cleanup all expired instances?')">
+                        <i class="fas fa-broom"></i> Cleanup Expired
+                    </button>
+                </form>
+                <a href="{{ url_for('status_dashboard') }}" class="btn btn-info">
+                    <i class="fas fa-tachometer-alt"></i> Status Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Instances -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-users"></i> User Instances</h5>
+                <span class="badge bg-primary">{{ all_instances|length }} total instances</span>
+            </div>
+            <div class="card-body">
+                {% if instances_by_user %}
+                    {% for user_key, user_data in instances_by_user.items() %}
+                    <div class="user-section mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0">
+                                <i class="fas fa-user"></i> {{ user_data.username }}
+                                <small class="text-muted">(ID: {{ user_data.user_id }})</small>
+                            </h6>
+                            <div>
+                                <span class="badge bg-secondary">{{ user_data.instances|length }} instances</span>
+                            </div>
+                        </div>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Challenge</th>
+                                        <th>Status</th>
+                                        <th>Container</th>
+                                        <th>URL</th>
+                                        <th>Created</th>
+                                        <th>Expires</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for instance in user_data.instances %}
+                                    <tr>
+                                        <td>
+                                            <span class="badge bg-primary">{{ instance.challenge_name }}</span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if instance.status == 'running' else 'warning' if instance.status == 'creating' else 'secondary' }}">
+                                                {{ instance.status }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <code>{{ instance.container_name }}</code>
+                                        </td>
+                                        <td>
+                                            {% if instance.url %}
+                                                <a href="{{ instance.url }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-external-link-alt"></i> Open
+                                                </a>
+                                            {% else %}
+                                                <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <small>{{ instance.created_at[:16] }}</small>
+                                        </td>
+                                        <td>
+                                            <small class="text-warning">{{ instance.expires_at[:16] if instance.expires_at else 'N/A' }}</small>
+                                        </td>
+                                        <td>
+                                            <form method="POST" action="{{ url_for('admin_delete_instance') }}" class="admin-delete-form d-inline">
+                                                <input type="hidden" name="container_name" value="{{ instance.container_name }}">
+                                                <input type="hidden" name="user_id" value="{{ instance.user_id }}">
+                                                <button type="submit" class="btn btn-sm btn-danger" 
+                                                        onclick="return confirm('Are you sure you want to delete {{ instance.container_name }} owned by {{ instance.username }}?')"
+                                                        title="Delete Instance">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <hr>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-server fa-3x mb-3"></i>
+                        <p>No active instances found.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-12 text-center">
+        <a href="{{ url_for('index') }}" class="btn btn-primary">
+            <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshAdminData() {
+    const btn = document.querySelector('button[onclick="refreshAdminData()"]');
+    const originalText = btn.innerHTML;
+    
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+    btn.disabled = true;
+    
+    // Refresh the page after a short delay
+    setTimeout(() => {
+        location.reload();
+    }, 500);
+}
+
+// Handle admin delete with AJAX
+document.querySelectorAll('.admin-delete-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const containerName = form.querySelector('input[name="container_name"]').value;
+        const userId = form.querySelector('input[name="user_id"]').value;
+        
+        if (!confirm(`Are you sure you want to delete container ${containerName}?`)) {
+            return;
+        }
+        
+        const button = form.querySelector('button[type="submit"]');
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        button.disabled = true;
+        
+        const formData = new FormData(form);
+        
+        fetch('{{ url_for("admin_delete_instance") }}', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Remove the row from the table
+                const row = button.closest('tr');
+                row.style.transition = 'opacity 0.5s';
+                row.style.opacity = '0';
+                setTimeout(() => {
+                    row.remove();
+                    // Check if this was the last instance for this user
+                    const tbody = button.closest('tbody');
+                    if (tbody.children.length === 0) {
+                        location.reload(); // Reload to update user sections
+                    }
+                }, 500);
+                
+                // Show success message
+                const alertHtml = `
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        Instance ${containerName} deleted successfully.
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+                document.querySelector('.container').insertAdjacentHTML('afterbegin', alertHtml);
+                
+            } else {
+                alert('Error: ' + data.error);
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        })
+        .catch(error => {
+            alert('Error deleting instance: ' + error);
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+    });
+});
+
+// Auto-refresh every 30 seconds
+setInterval(() => {
+    location.reload();
+}, 30000);
+</script>
+{% endblock %}

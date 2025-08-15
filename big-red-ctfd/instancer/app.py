@@ -76,6 +76,12 @@ CHALLENGES = {
     }
 }
 
+# Global container limits
+CONTAINER_LIMITS = {
+    'max_global_instances': 50,  # Maximum containers that can run globally at any time
+    'warning_threshold': 45      # Show warning when approaching limit
+}
+
 class ChallengeInstancer:
     def __init__(self):
         # Initialize database (only instances table, users come from CTFd)
@@ -209,6 +215,16 @@ class ChallengeInstancer:
         if not self.container_client:
             return {'success': False, 'error': 'Azure authentication not available'}
         
+        # Check global instance limit FIRST
+        current_global_count = self.get_global_instance_count()
+        if current_global_count >= CONTAINER_LIMITS['max_global_instances']:
+            return {
+                'success': False, 
+                'error': f'Server at capacity! {current_global_count}/{CONTAINER_LIMITS["max_global_instances"]} containers running. Please wait for a slot to open up.',
+                'error_type': 'capacity_limit',
+                'retry_suggested': True
+            }
+        
         # Check if user already has an active instance of this challenge
         if self.user_has_active_instance(user_id, challenge_id):
             return {'success': False, 'error': f'You already have an active instance of this challenge. Please delete it first.'}
@@ -224,6 +240,7 @@ class ChallengeInstancer:
         print(f"   Challenge: {challenge['name']}")
         print(f"   Container: {container_name}")
         print(f"   Image: {challenge['image']}")
+        print(f"   Global usage: {current_global_count + 1}/{CONTAINER_LIMITS['max_global_instances']}")
         
         try:
             # Create container group
@@ -262,13 +279,18 @@ class ChallengeInstancer:
             
             print(f"✅ Container creation initiated!")
             print(f"   URL: {challenge_url}")
+            print(f"   Global usage now: {current_global_count + 1}/{CONTAINER_LIMITS['max_global_instances']}")
             print(f"   Note: Container may take 1-2 minutes to be fully accessible")
             
             return {
                 'success': True,
                 'url': challenge_url,
                 'container_name': container_name,
-                'expires_at': expires_at.isoformat()
+                'expires_at': expires_at.isoformat(),
+                'global_usage': {
+                    'current': current_global_count + 1,
+                    'max': CONTAINER_LIMITS['max_global_instances']
+                }
             }
             
         except Exception as e:
@@ -284,8 +306,8 @@ class ChallengeInstancer:
             image=image,
             resources=ResourceRequirements(
                 requests=ResourceRequests(
-                    memory_in_gb=0.5,
-                    cpu=0.25
+                    memory_in_gb=0.1,  # Fixed: changed from 0.25 to 0.1
+                    cpu=0.1
                 )
             ),
             ports=[ContainerPort(port=port)]
@@ -376,6 +398,250 @@ class ChallengeInstancer:
         except Exception as e:
             print(f"Error checking active instances: {e}")
             return False
+    
+    def get_global_instance_count(self) -> int:
+        """Get the total number of active instances across all users"""
+        try:
+            import subprocess
+            
+            query = '''
+            SELECT COUNT(*) as total_count
+            FROM instancer_instances 
+            WHERE status IN ('creating', 'running');
+            '''
+            
+            result = subprocess.run([
+                'docker', 'exec', 'big-red-ctfd-db-1',
+                'mysql', '-u', 'ctfd', f'-p{self.get_db_password()}', 'ctfd',
+                '-e', query, '--batch', '--raw'
+            ], capture_output=True, text=True, check=True)
+            
+            lines = result.stdout.strip().split('\n')
+            if len(lines) > 1:  # Skip header
+                count = int(lines[1])
+                print(f"🌐 Global instance count: {count}/{CONTAINER_LIMITS['max_global_instances']}")
+                return count
+            
+            return 0
+            
+        except Exception as e:
+            print(f"Error getting global instance count: {e}")
+            return 0
+    
+    def get_all_instances_admin(self) -> List[Dict]:
+        """Get all active instances across all users for admin view"""
+        try:
+            import subprocess
+            
+            query = '''
+            SELECT 
+                ii.user_id,
+                u.name as username,
+                u.email,
+                ii.challenge_id,
+                ii.container_name,
+                ii.fqdn,
+                ii.status,
+                ii.created_at,
+                ii.expires_at
+            FROM instancer_instances ii
+            JOIN users u ON ii.user_id = u.id
+            WHERE ii.status IN ('creating', 'running')
+            ORDER BY ii.created_at DESC;
+            '''
+            
+            result = subprocess.run([
+                'docker', 'exec', 'big-red-ctfd-db-1',
+                'mysql', '-u', 'ctfd', f'-p{self.get_db_password()}', 'ctfd',
+                '-e', query, '--batch', '--raw'
+            ], capture_output=True, text=True, check=True)
+            
+            lines = result.stdout.strip().split('\n')
+            instances = []
+            
+            if len(lines) > 1:  # Skip header
+                for line in lines[1:]:
+                    if line.strip():
+                        parts = line.split('\t')
+                        if len(parts) >= 9:
+                            user_id, username, email, challenge_id, container_name, fqdn, status, created_at, expires_at = parts
+                            
+                            # Get challenge name
+                            challenge_name = CHALLENGES.get(challenge_id, {}).get('name', 'Unknown Challenge')
+                            
+                            # Format URL if running
+                            url = f"http://{fqdn}:1337" if status == 'running' and fqdn else None
+                            
+                            instances.append({
+                                'user_id': int(user_id),
+                                'username': username,
+                                'email': email,
+                                'challenge_id': challenge_id,
+                                'challenge_name': challenge_name,
+                                'container_name': container_name,
+                                'fqdn': fqdn,
+                                'status': status,
+                                'url': url,
+                                'created_at': created_at,
+                                'expires_at': expires_at
+                            })
+            
+            return instances
+            
+        except Exception as e:
+            print(f"Error getting all instances for admin: {e}")
+            return []
+    
+    def delete_instance_admin(self, container_name: str, user_id: int) -> bool:
+        """Admin method to delete any user's instance"""
+        try:
+            print(f"🔧 Admin deleting instance: {container_name} for user {user_id}")
+            
+            # Use the same deletion logic as regular delete - pass both user_id and container_name
+            success = self.delete_instance(user_id, container_name)
+            
+            if success:
+                print(f"✅ Admin successfully deleted instance {container_name}")
+            else:
+                print(f"❌ Admin failed to delete instance {container_name}")
+                
+            return success
+            
+        except Exception as e:
+            print(f"❌ Error in admin delete: {e}")
+            return False
+
+    def get_instance_stats(self) -> Dict:
+        """Get detailed statistics about current container usage"""
+        try:
+            import subprocess
+            
+            # Get total active instances
+            total_query = '''
+            SELECT COUNT(*) as total_count
+            FROM instancer_instances 
+            WHERE status IN ('creating', 'running');
+            '''
+            
+            # Get instances by challenge type
+            by_challenge_query = '''
+            SELECT challenge_id, COUNT(*) as count
+            FROM instancer_instances 
+            WHERE status IN ('creating', 'running')
+            GROUP BY challenge_id;
+            '''
+            
+            # Get instances by status
+            by_status_query = '''
+            SELECT status, COUNT(*) as count
+            FROM instancer_instances 
+            WHERE status IN ('creating', 'running')
+            GROUP BY status;
+            '''
+            
+            # Execute total count query
+            result = subprocess.run([
+                'docker', 'exec', 'big-red-ctfd-db-1',
+                'mysql', '-u', 'ctfd', f'-p{self.get_db_password()}', 'ctfd',
+                '-e', total_query, '--batch', '--raw'
+            ], capture_output=True, text=True, check=True)
+            
+            lines = result.stdout.strip().split('\n')
+            total_count = int(lines[1]) if len(lines) > 1 else 0
+            
+            # Execute by challenge query
+            result = subprocess.run([
+                'docker', 'exec', 'big-red-ctfd-db-1',
+                'mysql', '-u', 'ctfd', f'-p{self.get_db_password()}', 'ctfd',
+                '-e', by_challenge_query, '--batch', '--raw'
+            ], capture_output=True, text=True, check=True)
+            
+            lines = result.stdout.strip().split('\n')
+            by_challenge = {}
+            if len(lines) > 1:
+                for line in lines[1:]:
+                    if line.strip():
+                        parts = line.split('\t')
+                        if len(parts) >= 2:
+                            challenge_id, count = parts
+                            by_challenge[challenge_id] = int(count)
+            
+            # Execute by status query
+            result = subprocess.run([
+                'docker', 'exec', 'big-red-ctfd-db-1',
+                'mysql', '-u', 'ctfd', f'-p{self.get_db_password()}', 'ctfd',
+                '-e', by_status_query, '--batch', '--raw'
+            ], capture_output=True, text=True, check=True)
+            
+            lines = result.stdout.strip().split('\n')
+            by_status = {}
+            if len(lines) > 1:
+                for line in lines[1:]:
+                    if line.strip():
+                        parts = line.split('\t')
+                        if len(parts) >= 2:
+                            status, count = parts
+                            by_status[status] = int(count)
+            
+            # Get unique user count
+            users_query = '''
+            SELECT COUNT(DISTINCT user_id) as user_count
+            FROM instancer_instances 
+            WHERE status IN ('creating', 'running');
+            '''
+            
+            result = subprocess.run([
+                'docker', 'exec', 'big-red-ctfd-db-1',
+                'mysql', '-u', 'ctfd', f'-p{self.get_db_password()}', 'ctfd',
+                '-e', users_query, '--batch', '--raw'
+            ], capture_output=True, text=True, check=True)
+            
+            lines = result.stdout.strip().split('\n')
+            users_count = int(lines[1]) if len(lines) > 1 else 0
+            
+            # Get total users in the system
+            total_users_query = 'SELECT COUNT(*) as total FROM users;'
+            
+            result = subprocess.run([
+                'docker', 'exec', 'big-red-ctfd-db-1',
+                'mysql', '-u', 'ctfd', f'-p{self.get_db_password()}', 'ctfd',
+                '-e', total_users_query, '--batch', '--raw'
+            ], capture_output=True, text=True, check=True)
+            
+            lines = result.stdout.strip().split('\n')
+            total_users = int(lines[1]) if len(lines) > 1 else 0
+            
+            return {
+                'active_count': total_count,  # Changed from total_active to active_count
+                'creating_count': by_status.get('creating', 0),
+                'running_count': by_status.get('running', 0),
+                'active_users': users_count,
+                'total_users': total_users,
+                'max_allowed': CONTAINER_LIMITS['max_global_instances'],
+                'available_slots': max(0, CONTAINER_LIMITS['max_global_instances'] - total_count),
+                'usage_percentage': round((total_count / CONTAINER_LIMITS['max_global_instances']) * 100, 1),
+                'by_challenge': by_challenge,
+                'by_status': by_status,
+                'is_at_capacity': total_count >= CONTAINER_LIMITS['max_global_instances'],
+                'is_near_capacity': total_count >= CONTAINER_LIMITS['warning_threshold']
+            }
+            
+        except Exception as e:
+            print(f"Error getting instance stats: {e}")
+            return {
+                'active_count': 0,  # Changed from total_active to active_count
+                'creating_count': 0,
+                'running_count': 0,
+                'active_users': 0,
+                'total_users': 0,
+                'max_allowed': CONTAINER_LIMITS['max_global_instances'],
+                'available_slots': CONTAINER_LIMITS['max_global_instances'],
+                'usage_percentage': 0,
+                'by_challenge': {},
+                'by_status': {},
+                'is_at_capacity': False,
+                'is_near_capacity': False
+            }
 
     def get_user_instances(self, user_id: int) -> List[Dict]:
         """Get all active instances for a user from CTFd database"""
@@ -587,6 +853,9 @@ def index():
     
     print(f"🔒 Active challenge IDs: {active_challenge_ids}")
     
+    # Get global container statistics
+    stats = instancer.get_instance_stats()
+    
     # Generate a simple user UUID for display (not for security)
     import hashlib
     user_uuid_display = hashlib.md5(session['username'].encode()).hexdigest()[:8]
@@ -597,7 +866,8 @@ def index():
                          active_challenge_ids=active_challenge_ids,
                          username=session.get('username'),
                          user_type=session.get('user_type'),
-                         user_uuid=user_uuid_display)
+                         user_uuid=user_uuid_display,
+                         global_stats=stats)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -680,6 +950,90 @@ def create_instance():
         flash(f'Error creating instance: {result["error"]}', 'error')
     
     return redirect(url_for('index'))
+
+@app.route('/stats')
+def stats():
+    """API endpoint for real-time container statistics"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        stats = instancer.get_instance_stats()
+        return jsonify(stats)
+    except Exception as e:
+        print(f"❌ Error getting stats: {e}")
+        return jsonify({'error': 'Failed to get statistics'}), 500
+
+@app.route('/status_dashboard')
+def status_dashboard():
+    """Dedicated status dashboard page"""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    stats = instancer.get_instance_stats()
+    return render_template('status_dashboard.html', stats=stats)
+
+@app.route('/admin')
+def admin_dashboard():
+    """Admin dashboard showing all user instances"""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    # Check if user is admin
+    if session.get('user_type') != 'admin':
+        flash('Access denied. Admin privileges required.', 'error')
+        return redirect(url_for('index'))
+    
+    # Get all instances across all users
+    all_instances = instancer.get_all_instances_admin()
+    
+    # Get statistics
+    stats = instancer.get_instance_stats()
+    
+    # Group instances by user
+    instances_by_user = {}
+    for instance in all_instances:
+        user_key = f"{instance['username']} ({instance['user_id']})"
+        if user_key not in instances_by_user:
+            instances_by_user[user_key] = {
+                'user_id': instance['user_id'],
+                'username': instance['username'],
+                'email': instance['email'],
+                'instances': []
+            }
+        instances_by_user[user_key]['instances'].append(instance)
+    
+    return render_template('admin_dashboard.html', 
+                         instances_by_user=instances_by_user,
+                         all_instances=all_instances,
+                         stats=stats,
+                         total_users=len(instances_by_user))
+
+@app.route('/admin/delete_instance', methods=['POST'])
+def admin_delete_instance():
+    """Admin endpoint to delete any user's instance"""
+    if 'user_id' not in session or session.get('user_type') != 'admin':
+        return jsonify({'success': False, 'error': 'Admin access required'}), 403
+    
+    container_name = request.form.get('container_name')
+    target_user_id = request.form.get('user_id')
+    
+    if not container_name or not target_user_id:
+        return jsonify({'success': False, 'error': 'Missing required parameters'})
+    
+    try:
+        target_user_id = int(target_user_id)
+        success = instancer.delete_instance_admin(container_name, target_user_id)
+        
+        if success:
+            flash(f'Instance {container_name} deleted successfully', 'success')
+            return jsonify({'success': True, 'message': 'Instance deleted successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to delete instance'})
+            
+    except Exception as e:
+        print(f"❌ Admin delete error: {e}")
+        return jsonify({'success': False, 'error': f'Error: {str(e)}'})
 
 def start_app():
     """Start the Flask application"""

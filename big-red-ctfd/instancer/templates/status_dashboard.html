@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-tachometer-alt"></i> Server Status Dashboard</h2>
+        <p class="text-muted">Real-time container capacity and usage statistics</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card border-primary">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-server"></i> Container Capacity</h5>
+                <button id="refresh-btn" class="btn btn-outline-light btn-sm">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-4">
+                    <div class="display-4 mb-2" id="active-count">{{ stats.active_count }}</div>
+                    <div class="text-muted mb-2">Active Containers</div>
+                    <div class="h3 mb-0">
+                        {% set usage_percentage = (stats.active_count / 50 * 100) | round(1) %}
+                        <span class="badge 
+                                    {% if usage_percentage >= 90 %}bg-danger
+                                    {% elif usage_percentage >= 80 %}bg-warning
+                                    {% else %}bg-success{% endif %} 
+                                    fs-3 px-3 py-2 capacity-percentage" id="main-percentage">{{ usage_percentage }}%</span>
+                    </div>
+                </div>
+                
+                <div class="progress mb-3" style="height: 25px;">
+                    {% set usage_percentage = (stats.active_count / 50 * 100) | round(1) %}
+                    <div class="progress-bar 
+                                {% if usage_percentage >= 90 %}bg-danger
+                                {% elif usage_percentage >= 80 %}bg-warning
+                                {% else %}bg-success{% endif %} 
+                                progress-bar-striped progress-bar-animated" 
+                         role="progressbar" 
+                         style="width: {{ usage_percentage }}%"
+                         id="capacity-progress">
+                        <strong>{{ usage_percentage }}% Server Capacity</strong>
+                    </div>
+                </div>
+                
+                <div class="row text-center">
+                    <div class="col-4">
+                        <div class="h4 text-success" id="available-count">{{ 50 - stats.active_count }}</div>
+                        <div class="text-muted small">Available</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="h4 text-primary">50</div>
+                        <div class="text-muted small">Total Capacity</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="h4 text-info" id="total-users">{{ stats.total_users }}</div>
+                        <div class="text-muted small">Total Users</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card border-info">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-chart-line"></i> Usage Statistics</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Creating Containers:</span>
+                        <span class="badge bg-warning" id="creating-count">{{ stats.creating_count }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Running Containers:</span>
+                        <span class="badge bg-success" id="running-count">{{ stats.running_count }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Users with Instances:</span>
+                        <span class="badge bg-primary" id="active-users">{{ stats.active_users }}</span>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <div class="text-center">
+                    <div class="h5 mb-0">Average per User</div>
+                    <div class="text-muted mb-2">{{ ((stats.active_count / stats.active_users) | round(1)) if stats.active_users > 0 else 0 }} containers</div>
+                    
+                    <div class="small text-muted mt-3">
+                        <i class="fas fa-info-circle"></i>
+                        Container limit: 50 globally<br>
+                        Auto-expire: 15 minutes<br>
+                        Location: East US 2
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-exclamation-triangle"></i> Capacity Alerts</h5>
+            </div>
+            <div class="card-body" id="alerts-container">
+                {% if stats.active_count >= 48 %}
+                <div class="alert alert-danger">
+                    <i class="fas fa-ban"></i> <strong>Critical:</strong> Server is at maximum capacity ({{ stats.active_count }}/50). New container requests will be denied.
+                </div>
+                {% elif stats.active_count >= 45 %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> <strong>Warning:</strong> Server capacity is nearly full ({{ stats.active_count }}/50). Only {{ 50 - stats.active_count }} slots remaining.
+                </div>
+                {% else %}
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle"></i> <strong>Good:</strong> Server capacity is healthy ({{ stats.active_count }}/50). {{ 50 - stats.active_count }} slots available.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-12 text-center">
+        <a href="{{ url_for('index') }}" class="btn btn-primary">
+            <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateStatusDashboard() {
+    fetch('/stats')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.error('Error fetching stats:', data.error);
+                return;
+            }
+            
+            // Update main statistics
+            document.getElementById('active-count').textContent = data.active_count || 0;
+            document.getElementById('available-count').textContent = 50 - (data.active_count || 0);
+            document.getElementById('total-users').textContent = data.total_users || 0;
+            document.getElementById('creating-count').textContent = data.creating_count || 0;
+            document.getElementById('running-count').textContent = data.running_count || 0;
+            document.getElementById('active-users').textContent = data.active_users || 0;
+            
+            // Update progress bar
+            const usagePercentage = Math.round((data.active_count || 0) / 50 * 100 * 10) / 10;
+            const progressBar = document.getElementById('capacity-progress');
+            progressBar.style.width = usagePercentage + '%';
+            progressBar.innerHTML = '<strong>' + usagePercentage + '% Server Capacity</strong>';
+            
+            // Update main percentage badge
+            const mainPercentage = document.getElementById('main-percentage');
+            mainPercentage.textContent = usagePercentage + '%';
+            
+            // Update colors for both progress bar and percentage badge
+            progressBar.classList.remove('bg-success', 'bg-warning', 'bg-danger');
+            mainPercentage.classList.remove('bg-success', 'bg-warning', 'bg-danger');
+            
+            if (usagePercentage >= 90) {
+                progressBar.classList.add('bg-danger');
+                mainPercentage.classList.add('bg-danger');
+            } else if (usagePercentage >= 80) {
+                progressBar.classList.add('bg-warning');
+                mainPercentage.classList.add('bg-warning');
+            } else {
+                progressBar.classList.add('bg-success');
+                mainPercentage.classList.add('bg-success');
+            }
+            
+            // Update alerts
+            const alertsContainer = document.getElementById('alerts-container');
+            let alertHtml = '';
+            
+            if (data.active_count >= 48) {
+                alertHtml = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-ban"></i> <strong>Critical:</strong> Server is at maximum capacity (${data.active_count}/50). New container requests will be denied.
+                    </div>
+                `;
+            } else if (data.active_count >= 45) {
+                alertHtml = `
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i> <strong>Warning:</strong> Server capacity is nearly full (${data.active_count}/50). Only ${50 - data.active_count} slots remaining.
+                    </div>
+                `;
+            } else {
+                alertHtml = `
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle"></i> <strong>Good:</strong> Server capacity is healthy (${data.active_count}/50). ${50 - data.active_count} slots available.
+                    </div>
+                `;
+            }
+            
+            alertsContainer.innerHTML = alertHtml;
+        })
+        .catch(error => {
+            console.error('Error updating status dashboard:', error);
+        });
+}
+
+// Auto-refresh every 5 seconds
+setInterval(updateStatusDashboard, 5000);
+
+// Manual refresh button
+document.getElementById('refresh-btn').addEventListener('click', function() {
+    const icon = this.querySelector('i');
+    icon.classList.add('fa-spin');
+    updateStatusDashboard();
+    setTimeout(() => icon.classList.remove('fa-spin'), 1000);
+});
+</script>
+{% endblock %}

@@ -41,6 +41,60 @@
     </div>
 
     <div class="col-md-4">
+        <!-- Global Container Statistics -->
+        <div class="card mb-3 border-info">
+            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="fas fa-chart-bar"></i> Server Capacity</h6>
+                <button id="refresh-stats" class="btn btn-outline-light btn-sm" title="Refresh Stats">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span><strong>Active Containers:</strong></span>
+                        <div class="d-flex align-items-center">
+                            <span class="badge bg-primary me-2" id="active-count">{{ global_stats.active_count if global_stats else 0 }}/50</span>
+                            {% set usage_percentage = ((global_stats.active_count if global_stats else 0) / 50 * 100) | round(1) %}
+                            <span class="badge 
+                                        {% if usage_percentage >= 90 %}bg-danger
+                                        {% elif usage_percentage >= 80 %}bg-warning
+                                        {% else %}bg-success{% endif %} 
+                                        fs-6 capacity-percentage" id="usage-percentage">{{ usage_percentage }}%</span>
+                        </div>
+                    </div>
+                    <div class="progress mb-2" style="height: 20px;">
+                        {% set usage_percentage = ((global_stats.active_count if global_stats else 0) / 50 * 100) | round(1) %}
+                        <div class="progress-bar bg-success progress-bar-striped" 
+                             role="progressbar" 
+                             style="width: {{ usage_percentage }}%"
+                             id="capacity-bar">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row text-sm">
+                    <div class="col-6">
+                        <div class="text-muted">Available:</div>
+                        <div class="text-success" id="available-slots">
+                            {{ 50 - (global_stats.active_count if global_stats else 0) }}/50
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="text-muted">Total Users:</div>
+                        <div id="total-users">{{ global_stats.total_users if global_stats else 0 }}</div>
+                    </div>
+                </div>
+                
+                {% if global_stats and global_stats.active_count >= 45 %}
+                <div class="alert alert-warning alert-sm mt-2 mb-0">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <small>Server capacity nearly full! New instances may be limited.</small>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
         <h2><i class="fas fa-server"></i> Your Instances</h2>
         <p class="text-muted">Manage your active challenge instances.</p>
         
@@ -133,6 +187,73 @@
 
 {% block scripts %}
 <script>
+// Function to update global stats
+function updateGlobalStats() {
+    fetch('/stats')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.error('Error fetching stats:', data.error);
+                return;
+            }
+            
+            // Update the display values
+            document.getElementById('active-count').textContent = (data.active_count || 0) + '/50';
+            document.getElementById('usage-percentage').textContent = Math.round((data.active_count || 0) / 50 * 100 * 10) / 10 + '%';
+            document.getElementById('available-slots').textContent = (50 - (data.active_count || 0)) + '/50';
+            document.getElementById('total-users').textContent = data.total_users || 0;
+            
+            // Update progress bar
+            const usagePercentage = Math.round((data.active_count || 0) / 50 * 100 * 10) / 10;
+            const progressBar = document.getElementById('capacity-bar');
+            progressBar.style.width = usagePercentage + '%';
+            // Progress bar stays green with no text content
+            
+            // Update percentage badge color
+            const percentageBadge = document.getElementById('usage-percentage');
+            percentageBadge.classList.remove('bg-success', 'bg-warning', 'bg-danger');
+            if (usagePercentage >= 90) {
+                percentageBadge.classList.add('bg-danger');
+            } else if (usagePercentage >= 80) {
+                percentageBadge.classList.add('bg-warning');
+            } else {
+                percentageBadge.classList.add('bg-success');
+            }
+            
+            // Show/hide warning message
+            const warningAlert = document.querySelector('.alert-warning');
+            if (data.active_count >= 45) {
+                if (!warningAlert) {
+                    const warningHtml = `
+                        <div class="alert alert-warning alert-sm mt-2 mb-0">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <small>Server capacity nearly full! New instances may be limited.</small>
+                        </div>
+                    `;
+                    document.querySelector('.card.border-info .card-body').insertAdjacentHTML('beforeend', warningHtml);
+                }
+            } else {
+                if (warningAlert) {
+                    warningAlert.remove();
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error updating stats:', error);
+        });
+}
+
+// Auto-refresh stats every 10 seconds
+setInterval(updateGlobalStats, 10000);
+
+// Manual refresh button
+document.getElementById('refresh-stats').addEventListener('click', function() {
+    const icon = this.querySelector('i');
+    icon.classList.add('fa-spin');
+    updateGlobalStats();
+    setTimeout(() => icon.classList.remove('fa-spin'), 500);
+});
+
 // Auto-refresh page every 30 seconds to update instance status
 setTimeout(function() {
     location.reload();
@@ -141,6 +262,22 @@ setTimeout(function() {
 // Show loading state when creating instances
 document.querySelectorAll('form[action="{{ url_for("create_instance") }}"]').forEach(function(form) {
     form.addEventListener('submit', function(e) {
+        // Check if we're at or near capacity before submitting
+        const activeCount = parseInt(document.getElementById('active-count').textContent);
+        
+        if (activeCount >= 50) {
+            e.preventDefault();
+            alert('❌ Server is at maximum capacity (50/50). Please wait for containers to expire before creating new ones.');
+            return false;
+        }
+        
+        if (activeCount >= 48) {
+            if (!confirm('⚠️ Server capacity is very limited (' + activeCount + '/50). Are you sure you want to create a container?')) {
+                e.preventDefault();
+                return false;
+            }
+        }
+        
         const button = form.querySelector('button[type="submit"]');
         button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
         button.disabled = true;

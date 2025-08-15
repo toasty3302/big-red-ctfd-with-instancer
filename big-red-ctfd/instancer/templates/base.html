@@ -32,6 +32,24 @@
         .status-deleted {
             color: #6c757d;
         }
+        .capacity-percentage {
+            font-size: 1.1em;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+        }
+        .progress {
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .progress-bar {
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+        .badge.fs-6 {
+            font-size: 0.9em !important;
+        }
+        .badge.fs-3 {
+            font-size: 1.75rem !important;
+        }
     </style>
 </head>
 <body>
@@ -42,6 +60,14 @@
             </a>
             {% if session.user_id %}
             <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="{{ url_for('status_dashboard') }}" title="View Server Status">
+                    <i class="fas fa-tachometer-alt"></i> Status
+                </a>
+                {% if session.user_type == 'admin' %}
+                <a class="nav-link" href="{{ url_for('admin_dashboard') }}" title="Admin Panel">
+                    <i class="fas fa-cog"></i> Admin
+                </a>
+                {% endif %}
                 <span class="navbar-text me-3">
                     <i class="fas fa-user"></i> {{ session.username }}
                     {% if session.user_type == 'admin' %}
