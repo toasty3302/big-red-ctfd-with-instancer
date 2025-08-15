@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <h2><i class="fas fa-puzzle-piece"></i> Available Challenges</h2>
+        <p class="text-muted">Click "Make Instance" to create your own private challenge environment.</p>
+        
+        <div class="row">
+            {% for challenge_id, challenge in challenges.items() %}
+            <div class="col-md-6 mb-4">
+                <div class="card challenge-card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">{{ challenge.name }}</h5>
+                        <span class="badge bg-primary">{{ challenge.category }}</span>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">{{ challenge.description }}</p>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <small class="text-muted">
+                                <i class="fas fa-network-wired"></i> Port {{ challenge.port }}
+                            </small>
+                            {% if challenge_id in active_challenge_ids %}
+                                <button type="button" class="btn btn-secondary btn-sm" disabled>
+                                    <i class="fas fa-check"></i> Instance Active
+                                </button>
+                            {% else %}
+                                <form method="POST" action="{{ url_for('create_instance') }}" class="d-inline">
+                                    <input type="hidden" name="challenge_id" value="{{ challenge_id }}">
+                                    <button type="submit" class="btn btn-success btn-sm">
+                                        <i class="fas fa-plus"></i> Make Instance
+                                    </button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <h2><i class="fas fa-server"></i> Your Instances</h2>
+        <p class="text-muted">Manage your active challenge instances.</p>
+        
+        {% if instances %}
+            {% for instance in instances %}
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">{{ instance.challenge_name }}</h6>
+                    <span class="badge bg-{{ 'success' if instance.status == 'running' else 'warning' if instance.status == 'creating' else 'secondary' }}">
+                        {{ instance.status }}
+                    </span>
+                </div>
+                <div class="card-body">
+                    {% if instance.status == 'running' %}
+                    <div class="mb-2">
+                        <strong>URL:</strong>
+                        <div class="instance-url">
+                            <a href="{{ instance.url }}" target="_blank" class="text-decoration-none">
+                                {{ instance.url }}
+                                <i class="fas fa-external-link-alt"></i>
+                            </a>
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="row text-muted small">
+                        <div class="col-6">
+                            <strong>Created:</strong><br>
+                            {{ instance.created_at[:16] }}
+                        </div>
+                        <div class="col-6">
+                            <strong>Expires:</strong><br>
+                            {{ instance.expires_at[:16] if instance.expires_at else 'N/A' }}
+                        </div>
+                    </div>
+                    
+                    {% if instance.status != 'deleted' %}
+                    <div class="mt-2">
+                        <form method="POST" action="{{ url_for('delete_instance') }}" class="delete-form d-inline">
+                            <input type="hidden" name="container_name" value="{{ instance.container_name }}">
+                            <button type="submit" class="btn btn-danger btn-sm" 
+                                    onclick="return confirm('Are you sure you want to delete this instance?')">
+                                <i class="fas fa-trash"></i> Remove Instance
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="card">
+                <div class="card-body text-center text-muted">
+                    <i class="fas fa-server fa-3x mb-3"></i>
+                    <p>No instances created yet.<br>Create your first challenge instance!</p>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-info-circle"></i> Information</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Your User Details:</h6>
+                        <ul class="list-unstyled">
+                            <li><strong>Username:</strong> {{ session.username }}</li>
+                            <li><strong>UUID:</strong> <code>{{ user_uuid }}</code></li>
+                            <li><strong>Active Instances:</strong> {{ instances|length }}</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Instance Information:</h6>
+                        <ul class="list-unstyled">
+                            <li><strong>Auto-expire:</strong> 1 hour after creation</li>
+                            <li><strong>Location:</strong> East US 2</li>
+                            <li><strong>Registry:</strong> Azure Container Registry</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Auto-refresh page every 30 seconds to update instance status
+setTimeout(function() {
+    location.reload();
+}, 30000);
+
+// Show loading state when creating instances
+document.querySelectorAll('form[action="{{ url_for("create_instance") }}"]').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+        const button = form.querySelector('button[type="submit"]');
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
+        button.disabled = true;
+    });
+});
+
+// Handle delete instance with AJAX
+document.querySelectorAll('form[action="{{ url_for("delete_instance") }}"]').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        if (!confirm('Are you sure you want to delete this instance?')) {
+            return;
+        }
+        
+        const button = form.querySelector('button[type="submit"]');
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+        button.disabled = true;
+        
+        const formData = new FormData(form);
+        
+        fetch('{{ url_for("delete_instance") }}', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Refresh page to update instance list
+                location.reload();
+            } else {
+                alert('Error: ' + data.error);
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        })
+        .catch(error => {
+            alert('Error deleting instance: ' + error);
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+    });
+});
+</script>
+{% endblock %}

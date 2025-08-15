@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git/
+.gitignore
+*.md
+.env
+.venv/
+venv/
+instancer.db
+AzureCLI.msi
+*.bat

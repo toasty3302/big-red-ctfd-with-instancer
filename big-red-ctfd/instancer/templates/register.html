@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h3><i class="fas fa-user-plus"></i> Register</h3>
+                <p class="text-muted mb-0">Create an account to access challenge instances</p>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-user"></i></span>
+                            <input type="text" class="form-control" id="username" name="username" required>
+                        </div>
+                        <small class="form-text text-muted">Choose a unique username for your account</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-lock"></i></span>
+                            <input type="password" class="form-control" id="password" name="password" required minlength="6">
+                        </div>
+                        <small class="form-text text-muted">Password must be at least 6 characters long</small>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Note:</strong> Upon registration, you will be assigned a unique UUID that will be used to identify your challenge instances.
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-user-plus"></i> Register
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="card-footer text-center">
+                <p class="mb-0">
+                    Already have an account? 
+                    <a href="{{ url_for('login') }}" class="text-decoration-none">
+                        <i class="fas fa-sign-in-alt"></i> Login here
+                    </a>
+                </p>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5><i class="fas fa-shield-alt"></i> Security</h5>
+            </div>
+            <div class="card-body">
+                <ul>
+                    <li>Passwords are securely hashed using industry standards</li>
+                    <li>Each user gets a unique UUID for instance tracking</li>
+                    <li>All challenge instances are isolated and secure</li>
+                    <li>Instances automatically expire for security</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

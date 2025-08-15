@@ -1,0 +1,106 @@
+services:
+  ctfd:
+    build: .
+    user: root
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - UPLOAD_FOLDER=/var/uploads
+      - DATABASE_URL=mysql+pymysql://ctfd:${CTFD_DB_PASSWORD}@db/ctfd
+      - REDIS_URL=redis://cache:6379
+      - WORKERS=1
+      - LOG_FOLDER=/var/log/CTFd
+      - ACCESS_LOG=-
+      - ERROR_LOG=-
+      - REVERSE_PROXY=true
+      - FLASK_APP=CTFd:create_app
+      - SECRET_KEY=${FLASK_SECRET_KEY}
+    volumes:
+      - logs:/var/log/CTFd
+      - uploads:/var/uploads
+    depends_on:
+      - db
+    networks:
+        default:
+        internal:
+
+  nginx:
+    image: nginx:stable
+    restart: always
+    volumes:
+      - ./conf/nginx/http.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - 80:80
+    depends_on:
+      - ctfd
+
+  db:
+    container_name: big-red-ctfd-db-1
+    image: mariadb:10.11
+    restart: always
+    environment:
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}
+      - MARIADB_USER=ctfd
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD}
+      - MARIADB_DATABASE=ctfd
+      - MARIADB_AUTO_UPGRADE=1
+    volumes:
+      - mysql:/var/lib/mysql
+    networks:
+        internal:
+    # This command is required to set important mariadb defaults
+    command: [mysqld, --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --wait_timeout=28800, --log-warnings=0]
+
+  cache:
+    image: redis:4
+    restart: always
+    volumes:
+    - redis:/data
+    networks:
+        internal:
+
+  instancer:
+    build: ./instancer
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - AZURE_SUBSCRIPTION_ID=${AZURE_SUBSCRIPTION_ID}
+      - AZURE_RESOURCE_GROUP=${AZURE_RESOURCE_GROUP}
+      - AZURE_LOCATION=${AZURE_LOCATION}
+      - ACR_SERVER=${ACR_SERVER}
+      - ACR_USERNAME=${ACR_USERNAME}
+      - ACR_PASSWORD=${ACR_PASSWORD}
+      - CTFD_DB_HOST=${CTFD_DB_HOST}
+      - CTFD_DB_PORT=${CTFD_DB_PORT}
+      - CTFD_DB_USER=${CTFD_DB_USER}
+      - CTFD_DB_PASSWORD=${CTFD_DB_PASSWORD}
+      - CTFD_DB_NAME=${CTFD_DB_NAME}
+      - DOCKER_MODE=${DOCKER_MODE}
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      # Azure Service Principal (REQUIRED for automated authentication)
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - instancer_data:/app/data
+    depends_on:
+      - db
+      - ctfd
+    networks:
+      - default
+      - internal
+
+networks:
+    default:
+    internal:
+        internal: true
+
+volumes:
+  redis:
+  mysql:
+  logs:
+  uploads:
+  instancer_data:
